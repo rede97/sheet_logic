@@ -6,13 +6,6 @@ use std::io::{Cursor, Read};
 use std::rc::Rc;
 use zip::ZipArchive;
 
-struct Sheet {}
-
-pub struct Excel {
-    shared_strings: Vec<Rc<String>>,
-    archive: ZipArchive<Cursor<Vec<u8>>>,
-}
-
 fn get_xml_attribute<'a>(e: &'a BytesStart, key: &[u8]) -> Option<Cow<'a, [u8]>> {
     for attr in e.attributes() {
         match attr {
@@ -23,6 +16,38 @@ fn get_xml_attribute<'a>(e: &'a BytesStart, key: &[u8]) -> Option<Cow<'a, [u8]>>
         }
     }
     return None;
+}
+
+pub struct CellPosition {
+    pub x: u16,
+    pub y: u16,
+}
+
+pub enum Cell {
+    None,
+    Primary(Rc<String>),
+    Merge {
+        primary: CellPosition,
+        offset: CellPosition,
+    },
+}
+
+pub struct Sheet {
+    Cells: Vec<Vec<Cell>>,
+}
+
+impl Sheet {
+    fn from_xml(xml: &str, shared_strings: &Vec<Rc<String>>) -> Sheet {
+        let cells = Vec::new();
+        let mut reader = Reader::from_str(xml);
+        reader.trim_text(true);
+        return Sheet { Cells: cells };
+    }
+}
+
+pub struct Excel {
+    shared_strings: Vec<Rc<String>>,
+    archive: ZipArchive<Cursor<Vec<u8>>>,
 }
 
 #[allow(dead_code)]
@@ -36,11 +61,15 @@ impl Excel {
         };
     }
 
-    fn shared_strings(archive: &mut ZipArchive<Cursor<Vec<u8>>>) -> Vec<Rc<String>> {
-        let mut shared_strings_doc = archive.by_name("xl/sharedStrings.xml").unwrap();
+    fn get_xml(archive: &mut ZipArchive<Cursor<Vec<u8>>>, path: &str) -> String {
+        let mut doc = archive.by_name("xl/sharedStrings.xml").unwrap();
         let mut content = String::new();
-        shared_strings_doc.read_to_string(&mut content).unwrap();
+        doc.read_to_string(&mut content).unwrap();
+        return content;
+    }
 
+    fn shared_strings(archive: &mut ZipArchive<Cursor<Vec<u8>>>) -> Vec<Rc<String>> {
+        let content = Excel::get_xml(archive, "xl/sharedStrings.xml");
         let mut reader = Reader::from_str(&content);
         reader.trim_text(true);
 
@@ -97,12 +126,8 @@ impl Excel {
     }
 
     pub fn sheets(&mut self) -> Vec<String> {
-        println!("{:?}", self.shared_strings);
         let mut sheets = Vec::new();
-
-        let mut workbook = self.archive.by_name("xl/workbook.xml").unwrap();
-        let mut content = String::new();
-        workbook.read_to_string(&mut content).unwrap();
+        let content = Excel::get_xml(&mut self.archive, "xl/workbook.xml");
 
         let mut reader = Reader::from_str(&content);
         reader.trim_text(true);
@@ -131,4 +156,9 @@ impl Excel {
 
         return sheets;
     }
+
+    // pub fn open(&mut self, sheet: &str) -> Sheet {
+
+    //     return Sheet{};
+    // }
 }
