@@ -1,50 +1,12 @@
-use quick_xml::events::BytesStart;
 use quick_xml::{self, events::Event, Reader};
-use std::borrow::Cow;
 use std::fs;
 use std::io::{Cursor, Read};
 use std::rc::Rc;
 use zip::ZipArchive;
 
-fn get_xml_attribute<'a>(e: &'a BytesStart, key: &[u8]) -> Option<Cow<'a, [u8]>> {
-    for attr in e.attributes() {
-        match attr {
-            Ok(ref attr) if attr.key == key => {
-                return Some(attr.value.clone());
-            }
-            _ => {}
-        }
-    }
-    return None;
-}
+use super::{get_xml_attribute, Sheet};
 
-pub struct CellPosition {
-    pub x: u16,
-    pub y: u16,
-}
-
-pub enum Cell {
-    None,
-    Primary(Rc<String>),
-    Merge {
-        primary: CellPosition,
-        offset: CellPosition,
-    },
-}
-
-pub struct Sheet {
-    Cells: Vec<Vec<Cell>>,
-}
-
-impl Sheet {
-    fn from_xml(xml: &str, shared_strings: &Vec<Rc<String>>) -> Sheet {
-        let cells = Vec::new();
-        let mut reader = Reader::from_str(xml);
-        reader.trim_text(true);
-        return Sheet { Cells: cells };
-    }
-}
-
+#[allow(dead_code)]
 pub struct Excel {
     shared_strings: Vec<Rc<String>>,
     archive: ZipArchive<Cursor<Vec<u8>>>,
@@ -62,7 +24,7 @@ impl Excel {
     }
 
     fn get_xml(archive: &mut ZipArchive<Cursor<Vec<u8>>>, path: &str) -> String {
-        let mut doc = archive.by_name("xl/sharedStrings.xml").unwrap();
+        let mut doc = archive.by_name(path).expect(path);
         let mut content = String::new();
         doc.read_to_string(&mut content).unwrap();
         return content;
@@ -73,17 +35,13 @@ impl Excel {
         let mut reader = Reader::from_str(&content);
         reader.trim_text(true);
 
-        let mut buf = Vec::with_capacity(32);
+        let mut buf = Vec::with_capacity(64);
 
         let vec_len = match reader.read_event(&mut buf) {
             Ok(Event::Start(ref e)) if e.name() == b"sst" => get_xml_attribute(e, b"count"),
             _ => None,
         }
-        .and_then(|attr| {
-            std::str::from_utf8(attr.as_ref())
-                .ok()
-                .and_then(|s| s.parse::<usize>().ok())
-        });
+        .and_then(|attr| unsafe { std::str::from_utf8_unchecked(&attr).parse::<usize>().ok() });
 
         let mut shared_strings: Vec<Rc<String>> = Vec::with_capacity(match vec_len {
             Some(len) => len,
@@ -132,14 +90,14 @@ impl Excel {
         let mut reader = Reader::from_str(&content);
         reader.trim_text(true);
 
-        let mut buf = Vec::with_capacity(32);
+        let mut buf = Vec::with_capacity(64);
         loop {
             match reader.read_event(&mut buf) {
                 Ok(Event::Empty(ref e)) => match e.name() {
                     b"sheet" => {
-                        if let Some(a) = e.attributes().next() {
-                            sheets.push(String::from_utf8(a.unwrap().value.to_vec()).unwrap())
-                        }
+                        if let Some(a) = get_xml_attribute(e, b"name") {
+                            sheets.push(String::from_utf8(a.to_vec()).unwrap().to_lowercase());
+                        };
                     }
                     _ => {}
                 },
@@ -157,8 +115,11 @@ impl Excel {
         return sheets;
     }
 
-    // pub fn open(&mut self, sheet: &str) -> Sheet {
-
-    //     return Sheet{};
-    // }
+    pub fn sheet(&mut self, sheet: &str) -> Sheet {
+        let sheet_xml = Excel::get_xml(
+            &mut self.archive,
+            format!("xl/worksheets/{}.xml", sheet).as_str(),
+        );
+        return Sheet::from_xml(&sheet_xml, &self.shared_strings);
+    }
 }

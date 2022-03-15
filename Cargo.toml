@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 zip = "0.5.13"
 quick-xml = "0.22.0"
+nom = "7.1.0"
