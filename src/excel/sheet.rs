@@ -1,6 +1,6 @@
-use super::CellPosition;
+use super::{CellPosition, CellRange};
 use quick_xml::{self, events::Event, Reader};
-use std::rc::Rc;
+use std::{cmp::Ordering, mem::replace, rc::Rc};
 
 use super::get_xml_attribute;
 
@@ -8,10 +8,31 @@ use super::get_xml_attribute;
 pub enum Cell {
     None,
     Primary(Rc<String>),
-    Merge {
-        primary: CellPosition,
-        offset: CellPosition,
-    },
+    Merge { offset: CellPosition },
+}
+
+#[allow(dead_code)]
+impl Cell {
+    pub fn merged_cell(&mut self, pos: CellPosition, range: &CellRange) {
+        assert!(pos <= range.end);
+        match pos.partial_cmp(&range.begin) {
+            Some(Ordering::Equal) => return,
+            Some(Ordering::Greater) => {
+                let _ = replace(
+                    self,
+                    Cell::Merge {
+                        offset: CellPosition {
+                            row: pos.row - range.begin.row,
+                            col: pos.col - range.begin.col,
+                        },
+                    },
+                );
+            }
+            _ => {
+                unreachable!("{} ? {}", &pos, &range.begin);
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -29,7 +50,7 @@ impl Sheet {
 
         let mut row: Option<u16> = None;
         let mut pos: Option<CellPosition> = None;
-        let mut value = false;
+        let mut cell_value = false;
 
         loop {
             match reader.read_event(&mut buf) {
@@ -54,9 +75,9 @@ impl Sheet {
 
                         match &pos {
                             Some(ref pos) => {
-                                assert!(pos.row == row.unwrap());
-                                let current_row = &mut cells[(pos.row - 1) as usize];
-                                for _ in current_row.len()..(pos.col as usize) {
+                                assert!(pos.row + 1 == row.unwrap());
+                                let current_row = &mut cells[(pos.row) as usize];
+                                for _ in current_row.len()..(pos.col as usize + 1) {
                                     current_row.push(Cell::None);
                                 }
                             }
@@ -66,21 +87,23 @@ impl Sheet {
                         }
                     }
                     b"v" => {
-                        value = true;
+                        cell_value = true;
                     }
 
                     _ => {}
                 },
 
                 Ok(Event::Text(ref e)) => {
-                    if value == true {
+                    if cell_value == true {
                         let idx = unsafe {
                             let s = std::str::from_utf8_unchecked(&e);
                             s.parse::<usize>().expect(s)
                         };
                         match &pos {
                             Some(ref pos) => {
-                                println!("{} -> {}", pos, shared_strings[idx]);
+                                // println!("{} -> {}", pos, shared_strings[idx]);
+                                cells[pos.row as usize][pos.col as usize] =
+                                    Cell::Primary(shared_strings[idx].clone());
                             }
                             None => {
                                 unreachable!("ref {}", std::str::from_utf8(&e).unwrap());
@@ -94,7 +117,18 @@ impl Sheet {
                 Ok(Event::End(ref e)) => match e.name() {
                     b"row" => row = None,
                     b"c" => pos = None,
-                    b"v" => value = false,
+                    b"v" => cell_value = false,
+                    _ => {}
+                },
+
+                Ok(Event::Empty(ref e)) => match e.name() {
+                    b"mergeCell" => {
+                        let range = get_xml_attribute(e, b"ref").and_then(|a| unsafe {
+                            let s = std::str::from_utf8_unchecked(&a);
+                            Some(CellRange::from(s))
+                        });
+                        println!("{:?}", range.unwrap());
+                    }
                     _ => {}
                 },
 

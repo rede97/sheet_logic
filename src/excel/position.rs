@@ -1,3 +1,4 @@
+use std::cmp::{Ordering, PartialOrd};
 use std::fmt::{self, Display};
 
 mod cell_position_parser {
@@ -13,7 +14,7 @@ mod cell_position_parser {
         let col = t.0.chars().fold(0, |sum, c| {
             (c.to_ascii_uppercase() as u16) - ('A' as u16) + sum
         });
-        return CellPosition { row: t.1, col };
+        return CellPosition { row: t.1 - 1, col };
     }
 
     fn cell_position(input: &str) -> IResult<&str, (&str, u16)> {
@@ -39,7 +40,14 @@ mod cell_position_parser {
         use super::*;
         #[test]
         fn excel_position() {
-            assert_eq!(CellPosition { row: 8, col: 2 }, cell("C8"));
+            assert_eq!(CellPosition { row: 7, col: 2 }, cell("C8"));
+            assert_eq!(
+                CellRange {
+                    begin: "C8".into(),
+                    end: "C9".into()
+                },
+                range("C8:C9")
+            );
         }
     }
 }
@@ -82,6 +90,21 @@ impl From<(u16, u16)> for CellPosition {
     }
 }
 
+impl PartialOrd for CellPosition {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        return match (self.row.cmp(&other.row), self.col.cmp(&other.col)) {
+            (Ordering::Equal, Ordering::Equal) => Some(Ordering::Equal),
+            (Ordering::Greater | Ordering::Equal, Ordering::Greater | Ordering::Equal) => {
+                Some(Ordering::Greater)
+            }
+            (Ordering::Less | Ordering::Equal, Ordering::Less | Ordering::Equal) => {
+                Some(Ordering::Less)
+            }
+            _ => None,
+        };
+    }
+}
+
 impl Display for CellPosition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({}, {})", self.row, self.col)
@@ -105,5 +128,34 @@ impl From<&str> for CellRange {
     #[inline]
     fn from(range: &str) -> Self {
         return CellRange::new(range);
+    }
+}
+
+impl Display for CellRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.begin, self.end)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::cmp::{Ordering, PartialOrd};
+
+    #[test]
+    fn test_cmp() {
+        assert_eq!(
+            CellPosition::new("B6").partial_cmp(&("B6".into())),
+            Some(Ordering::Equal)
+        );
+        assert_eq!(
+            CellPosition::new("B6").partial_cmp(&("B5".into())),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            CellPosition::new("B6").partial_cmp(&("B7".into())),
+            Some(Ordering::Less)
+        );
+        assert_eq!(CellPosition::new("B6").partial_cmp(&("A7".into())), None);
     }
 }
