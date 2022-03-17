@@ -8,6 +8,7 @@ mod logic;
 pub use error::*;
 pub use signal::*;
 pub use logic::*;
+pub use module::*;
 
 type SignalWidth = u16;
 

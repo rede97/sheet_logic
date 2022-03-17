@@ -11,7 +11,7 @@ pub struct Module {
 
 #[allow(dead_code)]
 impl Module {
-    fn new() -> Module {
+    pub fn new() -> Module {
         return Module {
             input: Vec::new(),
             output: Vec::new(),

@@ -4,7 +4,7 @@ use std::{cmp::Ordering, mem::replace, rc::Rc};
 
 use super::get_xml_attribute;
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub enum Cell {
     None,
     Primary(Rc<String>),
@@ -37,7 +37,7 @@ impl Cell {
 
 #[allow(dead_code)]
 pub struct Sheet {
-    cells: Vec<Vec<Cell>>,
+    pub cells: Vec<Vec<Cell>>,
 }
 
 #[allow(dead_code)]
@@ -48,34 +48,34 @@ impl Sheet {
         reader.trim_text(true);
         let mut buf = Vec::with_capacity(64);
 
-        let mut row: Option<u16> = None;
-        let mut pos: Option<CellPosition> = None;
+        let mut curr_row_cnt: Option<u16> = None;
+        let mut curr_pos: Option<CellPosition> = None;
         let mut cell_value = false;
 
         loop {
             match reader.read_event(&mut buf) {
                 Ok(Event::Start(ref e)) => match e.name() {
                     b"row" => {
-                        row = get_xml_attribute(e, b"r").and_then(|a| unsafe {
+                        curr_row_cnt = get_xml_attribute(e, b"r").and_then(|a| unsafe {
                             std::str::from_utf8_unchecked(&a).parse::<u16>().ok()
                         });
 
-                        if let Some(row) = row {
+                        if let Some(row) = curr_row_cnt {
                             for _ in cells.len()..(row as usize) {
-                                cells.push(Vec::new());
+                                cells.push(Vec::with_capacity(16));
                             }
                         } else {
                             unreachable!("invaild xml event of row in excel");
                         }
                     }
                     b"c" => {
-                        pos = get_xml_attribute(e, b"r").and_then(|a| unsafe {
+                        curr_pos = get_xml_attribute(e, b"r").and_then(|a| unsafe {
                             Some(CellPosition::from(std::str::from_utf8_unchecked(&a)))
                         });
 
-                        match &pos {
+                        match &curr_pos {
                             Some(ref pos) => {
-                                assert!(pos.row + 1 == row.unwrap());
+                                assert!(pos.row + 1 == curr_row_cnt.unwrap());
                                 let current_row = &mut cells[(pos.row) as usize];
                                 for _ in current_row.len()..(pos.col as usize + 1) {
                                     current_row.push(Cell::None);
@@ -99,7 +99,7 @@ impl Sheet {
                             let s = std::str::from_utf8_unchecked(&e);
                             s.parse::<usize>().expect(s)
                         };
-                        match &pos {
+                        match &curr_pos {
                             Some(ref pos) => {
                                 // println!("{} -> {}", pos, shared_strings[idx]);
                                 cells[pos.row as usize][pos.col as usize] =
@@ -115,19 +115,31 @@ impl Sheet {
                 }
 
                 Ok(Event::End(ref e)) => match e.name() {
-                    b"row" => row = None,
-                    b"c" => pos = None,
+                    b"row" => curr_row_cnt = None,
+                    b"c" => curr_pos = None,
                     b"v" => cell_value = false,
                     _ => {}
                 },
 
                 Ok(Event::Empty(ref e)) => match e.name() {
+                    b"c" => {
+                        let current_row = &mut cells[curr_row_cnt.unwrap() as usize - 1];
+                        current_row.push(Cell::None);
+                    }
                     b"mergeCell" => {
-                        let range = get_xml_attribute(e, b"ref").and_then(|a| unsafe {
-                            let s = std::str::from_utf8_unchecked(&a);
-                            Some(CellRange::from(s))
-                        });
-                        println!("{:?}", range.unwrap());
+                        let range = get_xml_attribute(e, b"ref")
+                            .and_then(|a| unsafe {
+                                let s = std::str::from_utf8_unchecked(&a);
+                                Some(CellRange::from(s))
+                            })
+                            .unwrap();
+
+                        for row in range.rows() {
+                            for col in range.cols() {
+                                let pos: CellPosition = (row, col).into();
+                                cells[row as usize][col as usize].merged_cell(pos, &range);
+                            }
+                        }
                     }
                     _ => {}
                 },

@@ -1,5 +1,6 @@
 use std::cmp::{Ordering, PartialOrd};
 use std::fmt::{self, Display};
+use std::ops::Range;
 
 mod cell_position_parser {
     use super::{CellPosition, CellRange};
@@ -52,7 +53,7 @@ mod cell_position_parser {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CellPosition {
     pub row: u16,
     pub col: u16,
@@ -61,12 +62,12 @@ pub struct CellPosition {
 #[allow(dead_code)]
 impl CellPosition {
     #[inline]
-    fn new(pos: &str) -> CellPosition {
+    pub fn new(pos: &str) -> CellPosition {
         return cell_position_parser::cell(pos);
     }
 
     /// (row, col)
-    fn from_tuple(t: (u16, u16)) -> CellPosition {
+    pub fn from_tuple(t: (u16, u16)) -> CellPosition {
         return CellPosition { row: t.0, col: t.1 };
     }
 
@@ -117,10 +118,19 @@ pub struct CellRange {
     pub end: CellPosition,
 }
 
+#[allow(dead_code)]
 impl CellRange {
     #[inline]
     fn new(range: &str) -> CellRange {
         return cell_position_parser::range(range);
+    }
+
+    pub fn rows(&self) -> Range<u16> {
+        (self.begin.row)..(self.end.row + 1)
+    }
+
+    pub fn cols(&self) -> Range<u16> {
+        (self.begin.col)..(self.end.col + 1)
     }
 }
 
