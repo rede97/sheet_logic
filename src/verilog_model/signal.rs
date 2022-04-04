@@ -39,6 +39,7 @@ impl Default for SignalSource {
     }
 }
 
+#[derive(Clone)]
 pub struct Signal {
     pub key: SignalKey,
     pub length: SignalWidth,
