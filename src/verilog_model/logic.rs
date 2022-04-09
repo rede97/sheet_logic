@@ -3,10 +3,11 @@ use super::SignalWidth;
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Not, Shl, Shr, Sub};
 use std::rc::Rc;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LogicTree(Rc<LogicElem>);
 
 #[allow(unused)]
+#[derive(Debug)]
 pub enum LogicElem {
     Unit(Wire),
     Constant(u128, SignalWidth),

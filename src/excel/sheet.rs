@@ -7,8 +7,13 @@ use super::get_xml_attribute;
 #[derive(Debug)]
 pub enum Cell {
     None,
-    Primary(Rc<String>),
-    Merge { offset: CellPosition },
+    Primary {
+        content: Rc<String>,
+        size: CellPosition,
+    },
+    Merge {
+        offset: CellPosition,
+    },
 }
 
 #[allow(dead_code)]
@@ -16,7 +21,14 @@ impl Cell {
     pub fn merged_cell(&mut self, pos: CellPosition, range: &CellRange) {
         assert!(pos <= range.end);
         match pos.partial_cmp(&range.begin) {
-            Some(Ordering::Equal) => return,
+            Some(Ordering::Equal) => match self {
+                Cell::Primary { content: _, size } => {
+                    *size = range.size();
+                }
+                _ => {
+                    unreachable!()
+                }
+            },
             Some(Ordering::Greater) => {
                 let _ = replace(
                     self,
@@ -35,6 +47,11 @@ impl Cell {
     }
 }
 
+pub struct MergedCell {
+    pub offset: CellPosition,
+    pub size: CellPosition,
+}
+
 #[allow(dead_code)]
 pub struct Sheet {
     pub cells: Vec<Vec<Cell>>,
@@ -42,6 +59,43 @@ pub struct Sheet {
 
 #[allow(dead_code)]
 impl Sheet {
+    pub fn content(&self, ridx: usize, cidx: usize) -> Option<(Rc<String>, Option<MergedCell>)> {
+        if ridx < self.cells.len() {
+            let row = &self.cells[ridx];
+            if cidx < row.len() {
+                let cell = &row[cidx];
+                match cell {
+                    Cell::Primary { content, size } => {
+                        return Some((
+                            content.clone(),
+                            Some(MergedCell {
+                                offset: (0, 0).into(),
+                                size: size.clone(),
+                            }),
+                        ));
+                    }
+                    Cell::Merge { offset } => {
+                        match self
+                            .content(ridx - (offset.row as usize), cidx - (offset.col as usize))
+                        {
+                            Some((content, Some(mut merged_cell))) => {
+                                merged_cell.offset = offset.clone();
+                                return Some((content, Some(merged_cell)));
+                            }
+                            _ => {
+                                unreachable!()
+                            }
+                        }
+                    }
+                    Cell::None => {
+                        return None;
+                    }
+                }
+            }
+        }
+        return None;
+    }
+
     pub fn from_xml(xml: &str, shared_strings: &Vec<Rc<String>>) -> Sheet {
         let mut cells: Vec<Vec<Cell>> = Vec::new();
         let mut reader = Reader::from_str(xml);
@@ -102,8 +156,10 @@ impl Sheet {
                         match &curr_pos {
                             Some(ref pos) => {
                                 // println!("{} -> {}", pos, shared_strings[idx]);
-                                cells[pos.row as usize][pos.col as usize] =
-                                    Cell::Primary(shared_strings[idx].clone());
+                                cells[pos.row as usize][pos.col as usize] = Cell::Primary {
+                                    content: shared_strings[idx].clone(),
+                                    size: CellPosition { row: 1, col: 1 },
+                                };
                             }
                             None => {
                                 unreachable!("ref {}", std::str::from_utf8(&e).unwrap());

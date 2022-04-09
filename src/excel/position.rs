@@ -121,7 +121,7 @@ pub struct CellRange {
 #[allow(dead_code)]
 impl CellRange {
     #[inline]
-    fn new(range: &str) -> CellRange {
+    pub fn new(range: &str) -> CellRange {
         return cell_position_parser::range(range);
     }
 
@@ -131,6 +131,14 @@ impl CellRange {
 
     pub fn cols(&self) -> Range<u16> {
         (self.begin.col)..(self.end.col + 1)
+    }
+
+    pub fn size(&self) -> CellPosition {
+        return (
+            self.end.row - self.begin.row + 1,
+            self.end.col - self.begin.col + 1,
+        )
+            .into();
     }
 }
 

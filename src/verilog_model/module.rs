@@ -43,4 +43,8 @@ impl Module {
     pub fn get_signals_mut(&mut self) -> &mut HashMap<SignalKey, Signal> {
         return &mut self.signals;
     }
+
+    pub fn add_signal(&mut self, signal: Signal) {
+        self.signals.insert(signal.key.clone(), signal);
+    }
 }

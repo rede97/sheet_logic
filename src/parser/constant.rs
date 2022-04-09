@@ -3,7 +3,7 @@ use nom::{
     bytes::complete::{tag, take_while1},
     character::complete::{hex_digit1, u128 as uint128, u16 as uint16},
     combinator::map_res,
-    sequence::{pair, tuple},
+    sequence::{pair},
     IResult,
 };
 
@@ -18,10 +18,6 @@ fn from_bin(input: &str) -> Result<u128, std::num::ParseIntError> {
 fn is_bin_digit(c: char) -> bool {
     c.is_digit(2)
 }
-
-// fn dec_primary(input: &str) -> IResult<&str, u128> {
-//     map_res(take_while1(is_bin_digit), from_dec)(input)
-// }
 
 fn constant_hex(input: &str) -> IResult<&str, u128> {
     let (s, (_, num)) = pair(tag("'h"), map_res(hex_digit1, from_hex))(input)?;
@@ -47,7 +43,7 @@ fn bit_width(mut num: u128) -> u16 {
     w
 }
 
-fn constant(input: &str) -> IResult<&str, (u16, u128)> {
+pub fn constant(input: &str) -> IResult<&str, (u16, u128)> {
     let (s, (w, n)) = pair(uint16, alt((constant_hex, constant_dec, constant_bin)))(input)?;
     assert!(w >= bit_width(n));
     Ok((s, (w, n)))
