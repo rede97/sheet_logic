@@ -1,6 +1,6 @@
 use super::{CellPosition, CellRange};
 use quick_xml::{self, events::Event, Reader};
-use std::{cmp::Ordering, mem::replace, rc::Rc};
+use std::{cmp::Ordering, mem::replace, ops::Range, rc::Rc};
 
 use super::get_xml_attribute;
 
@@ -47,6 +47,7 @@ impl Cell {
     }
 }
 
+#[derive(Debug)]
 pub struct MergedCell {
     pub offset: CellPosition,
     pub size: CellPosition,
@@ -65,15 +66,20 @@ impl Sheet {
             if cidx < row.len() {
                 let cell = &row[cidx];
                 match cell {
-                    Cell::Primary { content, size } => {
-                        return Some((
-                            content.clone(),
-                            Some(MergedCell {
-                                offset: (0, 0).into(),
-                                size: size.clone(),
-                            }),
-                        ));
-                    }
+                    Cell::Primary { content, size } => match size {
+                        CellPosition { row: 1, col: 1 } => {
+                            return Some((content.clone(), None));
+                        }
+                        _ => {
+                            return Some((
+                                content.clone(),
+                                Some(MergedCell {
+                                    offset: (0, 0).into(),
+                                    size: size.clone(),
+                                }),
+                            ));
+                        }
+                    },
                     Cell::Merge { offset } => {
                         match self
                             .content(ridx - (offset.row as usize), cidx - (offset.col as usize))
@@ -94,6 +100,10 @@ impl Sheet {
             }
         }
         return None;
+    }
+
+    pub fn row(&self, ridx: usize) -> Range<usize> {
+        return 0..self.cells[ridx].len();
     }
 
     pub fn from_xml(xml: &str, shared_strings: &Vec<Rc<String>>) -> Sheet {

@@ -30,6 +30,7 @@ impl std::fmt::Display for WireIndex {
 #[derive(Clone, Debug)]
 #[allow(unused)]
 pub enum Wire {
+    Constant(u128, SignalWidth),
     Independent {
         signal: SignalKey,
         idx: WireIndex,
@@ -52,6 +53,9 @@ impl From<&Signal> for Wire {
 impl std::fmt::Display for Wire {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
+            Wire::Constant(_, w) => {
+                return write!(f, "bit_{}", *w);
+            }
             Wire::Independent { signal: key, idx } => {
                 return write!(f, "{}_{}", key.as_str(), idx);
             }
@@ -81,12 +85,18 @@ impl std::fmt::Display for Wire {
 }
 
 impl Wire {
+    pub fn bit(w: SignalWidth, c: u128) -> Self {
+        return Wire::Constant(c, w);
+    }
     pub fn compose(wires: Vec<Wire>) -> Self {
         return Wire::Compose { wires };
     }
 
     pub fn len(&self) -> SignalWidth {
         match &self {
+            Wire::Constant(_, w) => {
+                return *w;
+            }
             Wire::Independent { signal: _, idx } => {
                 return idx.0.len() as SignalWidth;
             }

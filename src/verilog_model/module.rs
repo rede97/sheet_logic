@@ -32,6 +32,7 @@ impl Module {
     pub fn new_signal(&mut self, name: String, length: SignalWidth) -> SignalKey {
         let key: SignalKey = name.into();
         let signal = Signal::new(key.clone(), length, SignalSource::Unconnected);
+        assert_eq!(false, self.signals.contains_key(&key));
         self.signals.insert(key.clone(), signal);
         return key;
     }
@@ -45,6 +46,7 @@ impl Module {
     }
 
     pub fn add_signal(&mut self, signal: Signal) {
+        assert_eq!(false, self.signals.contains_key(&signal.key));
         self.signals.insert(signal.key.clone(), signal);
     }
 }
