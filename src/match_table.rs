@@ -13,7 +13,7 @@ pub enum Section {
 #[derive(Debug)]
 pub enum MatchTableContent<'a> {
     Constant(u16, u128),
-    WireCase(&'a str, Option<Vec<(u16, u16)>>),
+    Signal(&'a str, Option<Vec<(u16, u16)>>),
 }
 
 #[derive(Debug)]
@@ -24,18 +24,65 @@ pub enum MatchTableColumn {
     Flag(String),
 }
 
-pub struct ConstantCase(HashMap<usize, HashSet<u64>>);
+pub struct SegConstantCase(HashMap<u64, Vec<usize>>);
 
-impl std::fmt::Display for ConstantCase {
+pub struct SegsConstantCase {
+    segs_set: HashMap<usize, SegConstantCase>,
+}
+
+pub struct ConstantCasePrinter<'a> {
+    cc: &'a SegsConstantCase,
+    header: &'a Vec<MatchTableColumn>,
+}
+
+impl<'a> ConstantCasePrinter<'a> {
+    pub fn new(cc: &'a SegsConstantCase, header: &'a Vec<MatchTableColumn>) -> Self {
+        return ConstantCasePrinter { cc, header };
+    }
+}
+
+impl<'a> std::fmt::Display for ConstantCasePrinter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut keys: Vec<&usize> = self.0.keys().collect();
+        let mut keys: Vec<&usize> = self.cc.segs_set.keys().collect();
         keys.sort();
         for k in keys {
-            let mut constants: Vec<&u64> = self.0[k].iter().collect();
-            constants.sort();
-            write!(f, "{}: {:?}; ", k, constants)?;
+            let signal = match &self.header[*k] {
+                MatchTableColumn::Segment(seg) => &seg.key,
+                _ => unreachable!(),
+            };
+            let mut constants: Vec<(&u64, &Vec<usize>)> = self.cc.segs_set[k].0.iter().collect();
+            constants.sort_by(|a, b| a.0.cmp(b.0));
+            writeln!(f, "{}: {:?}", signal.as_str(), constants)?;
         }
         return Ok(());
+    }
+}
+
+impl SegsConstantCase {
+    pub fn new() -> Self {
+        return SegsConstantCase {
+            segs_set: HashMap::new(),
+        };
+    }
+
+    pub fn insert(&mut self, case_idx: usize, seg_idx: usize, constant: u64) {
+        if !self.segs_set.contains_key(&seg_idx) {
+            self.segs_set
+                .insert(seg_idx, SegConstantCase(HashMap::new()));
+        }
+
+        let case = self.segs_set.get_mut(&seg_idx).unwrap();
+        match case.0.get_mut(&constant) {
+            Some(v) => {
+                v.push(case_idx);
+            }
+            None => {
+                let v = vec![case_idx];
+                case.0.insert(constant, v);
+            }
+        }
+
+        // .insert(constant as u64);
     }
 }
 
@@ -46,16 +93,81 @@ struct SignalMapSlot {
 }
 
 #[derive(Debug)]
-struct SignalMap {
-    slots: HashMap<usize, Vec<SignalMapSlot>>,
+struct SignalMapSlots {
+    slots: Vec<SignalMapSlot>,
+    slot_case: HashMap<usize, Vec<usize>>,
+}
+
+impl SignalMapSlots {
+    pub fn new() -> Self {
+        return {
+            SignalMapSlots {
+                slots: Vec::new(),
+                slot_case: HashMap::new(),
+            }
+        };
+    }
+
+    pub fn insert(&mut self, case_idx: usize, ranges: Vec<(u16, u16)>, segs: Range<usize>) {
+        let slot_idx = match self
+            .slots
+            .iter()
+            .position(|s| s.ranges == ranges && s.segs == segs)
+        {
+            Some(slot_idx) => slot_idx,
+            None => {
+                let slot_idx = self.slots.len();
+                self.slots.push(SignalMapSlot {
+                    ranges: ranges,
+                    segs: segs,
+                });
+                slot_idx
+            }
+        };
+
+        match self.slot_case.get_mut(&case_idx) {
+            Some(v) => {
+                v.push(slot_idx);
+            }
+            None => {
+                let v = vec![slot_idx];
+                self.slot_case.insert(case_idx, v);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SignalMapCase(HashMap<SignalKey, SignalMapSlots>);
+
+impl SignalMapCase {
+    pub fn new() -> Self {
+        return SignalMapCase(HashMap::new());
+    }
+
+    pub fn insert(
+        &mut self,
+        signal_key: &SignalKey,
+        case_idx: usize,
+        ranges: Vec<(u16, u16)>,
+        segs: Range<usize>,
+    ) {
+        if !self.0.contains_key(signal_key) {
+            self.0.insert(signal_key.clone(), SignalMapSlots::new());
+        }
+        self.0
+            .get_mut(signal_key)
+            .unwrap()
+            .insert(case_idx, ranges, segs);
+    }
 }
 
 #[allow(dead_code)]
 pub struct MatchTable {
     target: Wire,
     header: Vec<MatchTableColumn>,
-    signal_case: HashMap<SignalKey, Vec<(u16, Wire)>>,
-    constant_case: ConstantCase,
+    signal_case: SignalMapSlots,
+    constant_case: SegsConstantCase,
 }
 
 #[allow(dead_code)]
@@ -88,14 +200,21 @@ impl MatchTable {
         model.add_signal(match_signal.clone());
 
         let mut header: Vec<MatchTableColumn> = Vec::new();
+        let mut primary_idx = None;
         let ridx = row.next().unwrap();
         for cidx in sheet.row(ridx) {
             let mdl = model.get_signals_mut();
             match sheet.content(ridx, cidx) {
                 Some((c, None)) => {
                     if c.starts_with("#") {
-                        let (_, columd_cmd) = match_cmd(c.as_str()).unwrap();
-                        header.push(columd_cmd);
+                        let (_, colum_cmd) = match_cmd(c.as_str()).unwrap();
+                        match &colum_cmd {
+                            MatchTableColumn::Primary(_) => {
+                                primary_idx = Some(cidx);
+                            }
+                            _ => {}
+                        }
+                        header.push(colum_cmd);
                     } else {
                         let (_, ((h, l), alias)) = parser::range_alias(&c).unwrap();
                         let seg_wire = match_signal.range(l..h + 1).unwrap();
@@ -115,10 +234,12 @@ impl MatchTable {
             }
         }
 
-        println!("header: {:?}", header);
+        let primary_idx = primary_idx.unwrap();
+        println!("header: {:?}, primary: {}", header, primary_idx);
 
-        let mut content_case: HashMap<usize, HashSet<u64>> = HashMap::new();
-        let mut signal_case: HashMap<SignalKey, SignalMap> = HashMap::new();
+        let mut constant_case = SegsConstantCase::new();
+        let mut signal_case = SignalMapCase::new();
+        let mut primary_case: HashMap<usize, SignalKey> = HashMap::new();
 
         for ridx in row {
             let mut row_iter = sheet.row(ridx);
@@ -129,7 +250,7 @@ impl MatchTable {
                         let (_, content) = match_content(c.as_str()).expect(c.as_str());
                         match content {
                             MatchTableContent::Constant(constant_width, constant) => {
-                                println!("@ [{}:{}]", ridx, cidx,);
+                                // println!("@ [{}:{}]", ridx, cidx,);
                                 let constant = match merged.and_then(|merged| {
                                     if merged.size.col == 1 {
                                         None
@@ -163,14 +284,10 @@ impl MatchTable {
                                         constant as u64
                                     }
                                 };
-
-                                if !content_case.contains_key(&cidx) {
-                                    content_case.insert(cidx, HashSet::new());
-                                }
-                                content_case.get_mut(&cidx).unwrap().insert(constant as u64);
+                                constant_case.insert(ridx - begin, cidx, constant);
                             }
-                            MatchTableContent::WireCase(s, ranges) => {
-                                println!("{} {:?}", s, ranges);
+                            MatchTableContent::Signal(s, ranges) => {
+                                // println!("{} {:?}", s, ranges);
                                 match &header[cidx] {
                                     MatchTableColumn::Segment(_) => {
                                         let ranges = ranges.unwrap_or_else(|| {
@@ -180,18 +297,6 @@ impl MatchTable {
                                             )]
                                         });
                                         let signal = model.get_signals().get(s).expect(s).clone();
-                                        let signal_map = match signal_case.get_mut(&signal.key) {
-                                            Some(w) => w,
-                                            None => {
-                                                signal_case.insert(
-                                                    signal.key.clone(),
-                                                    SignalMap {
-                                                        slots: HashMap::new(),
-                                                    },
-                                                );
-                                                signal_case.get_mut(&signal.key).unwrap()
-                                            }
-                                        };
                                         let merged_cols = merged
                                             .and_then(|m| Some(m.size.col as usize))
                                             .unwrap_or(1);
@@ -199,17 +304,12 @@ impl MatchTable {
                                             row_iter.next();
                                         }
 
-                                        let slots = match signal_map.slots.get_mut(&ridx) {
-                                            Some(slots) => slots,
-                                            None => {
-                                                signal_map.slots.insert(ridx, Vec::new());
-                                                signal_map.slots.get_mut(&ridx).unwrap()
-                                            }
-                                        };
-                                        slots.push(SignalMapSlot {
+                                        signal_case.insert(
+                                            &signal.key,
+                                            ridx - begin,
                                             ranges,
-                                            segs: cidx..cidx + merged_cols,
-                                        });
+                                            cidx..cidx + merged_cols,
+                                        );
                                     }
 
                                     _ => {}
@@ -221,8 +321,11 @@ impl MatchTable {
                 }
             }
         }
-        println!("constant {}", ConstantCase(content_case));
-        println!("signal map {:?}", signal_case);
+        println!(
+            "constant case:\n{}",
+            ConstantCasePrinter::new(&constant_case, &header)
+        );
+        println!("signal case\n{:?}", signal_case);
         // return MatchTable { target, segments };
     }
 }

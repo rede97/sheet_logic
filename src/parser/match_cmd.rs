@@ -19,7 +19,7 @@ pub fn match_cmd(input: &str) -> IResult<&str, MatchTableColumn> {
 
 fn match_wire_case(input: &str) -> IResult<&str, MatchTableContent> {
     let (input, r) = sginal_ref(input)?;
-    return Ok((input, MatchTableContent::WireCase(r.0, r.1)));
+    return Ok((input, MatchTableContent::Signal(r.0, r.1)));
 }
 
 fn match_constant(input: &str) -> IResult<&str, MatchTableContent> {
