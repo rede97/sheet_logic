@@ -1,9 +1,11 @@
 use super::excel::Sheet;
-use super::verilog_model::{Module, Signal, SignalKey, SignalSource, Wire, WireIndex};
-use std::collections::{HashMap, HashSet};
-use std::ops::{Range, Shr};
-
 use super::parser::{self, match_cmd, match_content};
+use super::utils::binary_format;
+use super::verilog_model::{
+    LogicElem, LogicTree, Module, Signal, SignalKey, SignalSource, Wire, WireIndex,
+};
+use std::collections::HashMap;
+use std::ops::{Range, Shr};
 
 pub enum Section {
     None,
@@ -19,14 +21,15 @@ pub enum MatchTableContent<'a> {
 #[derive(Debug)]
 pub enum MatchTableColumn {
     None,
-    Segment(Signal),
-    Primary(String),
+    Segment(SignalKey),
     Flag(String),
 }
 
-pub struct SegConstantCase(HashMap<u64, Vec<usize>>);
+// number, case index
+pub struct SegConstantCase(HashMap<u128, Vec<usize>>);
 
 pub struct SegsConstantCase {
+    // segment index, case
     segs_set: HashMap<usize, SegConstantCase>,
 }
 
@@ -47,10 +50,10 @@ impl<'a> std::fmt::Display for ConstantCasePrinter<'a> {
         keys.sort();
         for k in keys {
             let signal = match &self.header[*k] {
-                MatchTableColumn::Segment(seg) => &seg.key,
+                MatchTableColumn::Segment(signal) => signal,
                 _ => unreachable!(),
             };
-            let mut constants: Vec<(&u64, &Vec<usize>)> = self.cc.segs_set[k].0.iter().collect();
+            let mut constants: Vec<(&u128, &Vec<usize>)> = self.cc.segs_set[k].0.iter().collect();
             constants.sort_by(|a, b| a.0.cmp(b.0));
             writeln!(f, "{}: {:?}", signal.as_str(), constants)?;
         }
@@ -65,7 +68,7 @@ impl SegsConstantCase {
         };
     }
 
-    pub fn insert(&mut self, case_idx: usize, seg_idx: usize, constant: u64) {
+    pub fn insert(&mut self, case_idx: usize, seg_idx: usize, constant: u128) {
         if !self.segs_set.contains_key(&seg_idx) {
             self.segs_set
                 .insert(seg_idx, SegConstantCase(HashMap::new()));
@@ -164,15 +167,49 @@ impl SignalMapCase {
 
 #[allow(dead_code)]
 pub struct MatchTable {
-    target: Wire,
     header: Vec<MatchTableColumn>,
-    signal_case: SignalMapSlots,
+    signal_case: SignalMapCase,
     constant_case: SegsConstantCase,
+    flags: Vec<(usize, HashMap<usize, String>)>,
 }
 
 #[allow(dead_code)]
 impl MatchTable {
-    pub fn new(model: &mut Module, sheet: &Sheet, begin: usize, end: usize) {
+    fn gen_constant_condition(&self, model: &mut Module) {
+        let segs_set = &self.constant_case.segs_set;
+        for (cidx, seg_case) in segs_set {
+            let column = &self.header[*cidx];
+            if let MatchTableColumn::Segment(signal_key) = column {
+                let signal = model.get_signals()[signal_key].clone();
+                let signal_len = signal.length;
+                let signal_unit: LogicTree = LogicElem::Unit(signal.into()).into();
+                let mut constants: Vec<u128> = seg_case.0.iter().map(|a| *a.0).collect();
+                constants.sort();
+                for constant in constants {
+                    let constant_unit: LogicTree =
+                        LogicElem::Unit(Wire::bit(signal_len, constant)).into();
+                    let constant_consdition_statement = signal_unit.clone().equal(constant_unit);
+                    let constant_consdition_key: SignalKey = format!(
+                        "{}_is_{}",
+                        signal_key.as_str(),
+                        binary_format(signal_len, constant)
+                    )
+                    .into();
+                    println!("{} {:?}", constant_consdition_key.as_str(), seg_case.0[&constant]);
+                    let constant_consdition_signal = Signal::new(
+                        constant_consdition_key,
+                        1,
+                        SignalSource::Logic(constant_consdition_statement),
+                    );
+                    model.add_signal(constant_consdition_signal);
+                }
+            } else {
+                unreachable!("{} -> {:?}", *cidx, column);
+            }
+        }
+    }
+
+    pub fn parse(model: &mut Module, sheet: &Sheet, begin: usize, end: usize) {
         let mut row = begin..end;
         let ridx = row.next().unwrap();
 
@@ -200,17 +237,17 @@ impl MatchTable {
         model.add_signal(match_signal.clone());
 
         let mut header: Vec<MatchTableColumn> = Vec::new();
-        let mut primary_idx = None;
+        let mut flags: Vec<(usize, HashMap<usize, String>)> = Vec::new();
         let ridx = row.next().unwrap();
         for cidx in sheet.row(ridx) {
-            let mdl = model.get_signals_mut();
+            let signals = model.get_signals_mut();
             match sheet.content(ridx, cidx) {
                 Some((c, None)) => {
                     if c.starts_with("#") {
                         let (_, colum_cmd) = match_cmd(c.as_str()).unwrap();
                         match &colum_cmd {
-                            MatchTableColumn::Primary(_) => {
-                                primary_idx = Some(cidx);
+                            MatchTableColumn::Flag(_) => {
+                                flags.push((cidx, HashMap::new()));
                             }
                             _ => {}
                         }
@@ -226,28 +263,26 @@ impl MatchTable {
                             seg_wire.len(),
                             SignalSource::Wire(seg_wire),
                         );
-                        mdl.insert(seg_key.clone(), seg_signal.clone());
-                        header.push(MatchTableColumn::Segment(seg_signal));
+                        signals.insert(seg_key.clone(), seg_signal.clone());
+                        header.push(MatchTableColumn::Segment(seg_key));
                     }
                 }
                 _ => {}
             }
         }
 
-        let primary_idx = primary_idx.unwrap();
-        println!("header: {:?}, primary: {}", header, primary_idx);
+        println!("header: {:?}, primary: {:?}", header, flags);
 
         let mut constant_case = SegsConstantCase::new();
         let mut signal_case = SignalMapCase::new();
-        let mut primary_case: HashMap<usize, SignalKey> = HashMap::new();
 
         for ridx in row {
             let mut row_iter = sheet.row(ridx);
             while let Some(cidx) = row_iter.next() {
                 // let cidx = *cidx;
                 match sheet.content(ridx, cidx) {
-                    Some((c, merged)) => {
-                        let (_, content) = match_content(c.as_str()).expect(c.as_str());
+                    Some((content, merged)) => {
+                        let (_, content) = match_content(content.as_str()).expect(content.as_str());
                         match content {
                             MatchTableContent::Constant(constant_width, constant) => {
                                 // println!("@ [{}:{}]", ridx, cidx,);
@@ -263,7 +298,9 @@ impl MatchTable {
                                             (cidx - merged.offset.col as usize)..cidx + 1;
                                         let offset =
                                             merged_col.fold(0_u16, |sum, idx| match &header[idx] {
-                                                MatchTableColumn::Segment(seg) => sum + seg.length,
+                                                MatchTableColumn::Segment(signal) => {
+                                                    sum + model.get_signals()[signal].length
+                                                }
                                                 _ => {
                                                     unreachable!();
                                                 }
@@ -272,60 +309,81 @@ impl MatchTable {
                                             assert_eq!(offset, constant_width);
                                         }
 
-                                        constant.shr((constant_width - offset) as usize) as u64
+                                        constant.shr((constant_width - offset) as usize) as u128
                                     }
                                     None => {
                                         match &header[cidx] {
-                                            MatchTableColumn::Segment(s) => {
-                                                assert_eq!(s.length, constant_width);
+                                            MatchTableColumn::Segment(signal) => {
+                                                assert_eq!(
+                                                    model.get_signals()[signal].length,
+                                                    constant_width
+                                                );
                                             }
                                             _ => unreachable!(),
                                         }
-                                        constant as u64
+                                        constant
                                     }
                                 };
                                 constant_case.insert(ridx - begin, cidx, constant);
                             }
-                            MatchTableContent::Signal(s, ranges) => {
-                                // println!("{} {:?}", s, ranges);
-                                match &header[cidx] {
-                                    MatchTableColumn::Segment(_) => {
-                                        let ranges = ranges.unwrap_or_else(|| {
-                                            vec![(
-                                                model.get_signals().get(s).expect(s).length - 1,
-                                                0,
-                                            )]
-                                        });
-                                        let signal = model.get_signals().get(s).expect(s).clone();
-                                        let merged_cols = merged
-                                            .and_then(|m| Some(m.size.col as usize))
-                                            .unwrap_or(1);
-                                        for _ in 0..merged_cols - 1 {
-                                            row_iter.next();
-                                        }
-
-                                        signal_case.insert(
-                                            &signal.key,
-                                            ridx - begin,
-                                            ranges,
-                                            cidx..cidx + merged_cols,
-                                        );
+                            MatchTableContent::Signal(signal, ranges) => match &header[cidx] {
+                                MatchTableColumn::Segment(_) => {
+                                    let ranges = ranges.unwrap_or_else(|| {
+                                        vec![(
+                                            model.get_signals().get(signal).expect(signal).length
+                                                - 1,
+                                            0,
+                                        )]
+                                    });
+                                    let signal =
+                                        model.get_signals().get(signal).expect(signal).clone();
+                                    let merged_cols =
+                                        merged.and_then(|m| Some(m.size.col as usize)).unwrap_or(1);
+                                    for _ in 0..merged_cols - 1 {
+                                        row_iter.next();
                                     }
 
-                                    _ => {}
+                                    signal_case.insert(
+                                        &signal.key,
+                                        ridx - begin,
+                                        ranges,
+                                        cidx..cidx + merged_cols,
+                                    );
                                 }
-                            }
+                                MatchTableColumn::Flag(_) => {
+                                    let flags_idx = flags
+                                        .iter()
+                                        .position(|v| v.0 == cidx)
+                                        .expect(format!("{}", cidx).as_str());
+                                    let flag = &mut flags[flags_idx].1;
+                                    flag.insert(ridx, signal.into());
+                                }
+
+                                _ => {}
+                            },
                         }
                     }
                     _ => {}
                 }
             }
         }
+
         println!(
             "constant case:\n{}",
             ConstantCasePrinter::new(&constant_case, &header)
         );
-        println!("signal case\n{:?}", signal_case);
-        // return MatchTable { target, segments };
+
+        println!("signal case\n{:?}", &signal_case);
+
+        println!("flags\n {:?}", &flags);
+        // MatchTable::gen_constant_condition(, model)
+        let match_table = MatchTable {
+            header,
+            signal_case,
+            constant_case,
+            flags,
+        };
+
+        match_table.gen_constant_condition(model);
     }
 }

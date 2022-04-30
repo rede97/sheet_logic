@@ -4,9 +4,9 @@ mod match_table;
 mod parser;
 #[allow(dead_code)]
 mod verilog_model;
-
 use excel::Sheet;
 use match_table::*;
+mod utils;
 
 fn create_model(sheet: &Sheet) {
     let mut module = verilog_model::Module::new();
@@ -42,7 +42,7 @@ fn create_model(sheet: &Sheet) {
 
                     "#end" => match section {
                         Section::Match(begin) => {
-                            MatchTable::new(&mut module, sheet, begin, ridx);
+                            MatchTable::parse(&mut module, sheet, begin, ridx);
                         }
                         Section::None => {
                             unreachable!()

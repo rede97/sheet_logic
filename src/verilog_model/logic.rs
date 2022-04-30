@@ -10,7 +10,6 @@ pub struct LogicTree(Rc<LogicElem>);
 #[derive(Debug)]
 pub enum LogicElem {
     Unit(Wire),
-    Constant(u128, SignalWidth),
     Combine(Vec<LogicTree>),
     Not(LogicTree),
     And(LogicTree, LogicTree),
@@ -37,15 +36,6 @@ impl From<Wire> for LogicElem {
     }
 }
 
-impl<T> From<T> for LogicElem
-where
-    T: Sized + Into<u128>,
-{
-    fn from(num: T) -> LogicElem {
-        return LogicElem::Constant(num.into(), (std::mem::size_of::<T>() * 8) as u16);
-    }
-}
-
 impl From<Wire> for LogicTree {
     fn from(w: Wire) -> LogicTree {
         return LogicTree(Rc::new(w.into()));
@@ -55,15 +45,6 @@ impl From<Wire> for LogicTree {
 impl From<LogicElem> for LogicTree {
     fn from(e: LogicElem) -> LogicTree {
         return LogicTree(e.into());
-    }
-}
-
-impl<T> From<T> for LogicTree
-where
-    T: Sized + Into<u128>,
-{
-    fn from(num: T) -> LogicTree {
-        return LogicElem::from(num).into();
     }
 }
 

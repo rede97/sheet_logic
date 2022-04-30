@@ -3,18 +3,13 @@ use super::{constant, sginal_ref};
 use crate::{MatchTableColumn, MatchTableContent};
 use nom::{branch::alt, bytes::complete::tag, sequence::delimited, IResult};
 
-fn match_primary(input: &str) -> IResult<&str, MatchTableColumn> {
-    let (input, prefix) = delimited(tag("#primary("), identifier, tag(")"))(input)?;
-    return Ok((input, MatchTableColumn::Primary(prefix.into())));
-}
-
 fn match_flag(input: &str) -> IResult<&str, MatchTableColumn> {
     let (input, prefix) = delimited(tag("#flag("), identifier, tag(")"))(input)?;
-    return Ok((input, MatchTableColumn::Primary(prefix.into())));
+    return Ok((input, MatchTableColumn::Flag(prefix.into())));
 }
 
 pub fn match_cmd(input: &str) -> IResult<&str, MatchTableColumn> {
-    return alt((match_primary, match_flag))(input);
+    return match_flag(input);
 }
 
 fn match_wire_case(input: &str) -> IResult<&str, MatchTableContent> {

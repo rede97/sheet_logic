@@ -44,8 +44,8 @@ pub enum Wire {
     },
 }
 
-impl From<&Signal> for Wire {
-    fn from(s: &Signal) -> Wire {
+impl From<Signal> for Wire {
+    fn from(s: Signal) -> Wire {
         return s.range(0..s.length).unwrap();
     }
 }
