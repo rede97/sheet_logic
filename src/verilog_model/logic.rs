@@ -11,10 +11,14 @@ pub struct LogicTree(Rc<LogicElem>);
 pub enum LogicElem {
     Unit(Wire),
     Combine(Vec<LogicTree>),
-    Not(LogicTree),
-    And(LogicTree, LogicTree),
-    Or(LogicTree, LogicTree),
-    Xor(LogicTree, LogicTree),
+    BitNot(LogicTree),
+    BitAnd(LogicTree, LogicTree),
+    BitOr(LogicTree, LogicTree),
+    BitXor(LogicTree, LogicTree),
+    LogicNot(LogicTree),
+    LogicAnd(LogicTree, LogicTree),
+    LogicOr(LogicTree, LogicTree),
+    LogicXor(LogicTree, LogicTree),
     TernaryCond(LogicTree, LogicTree, LogicTree),
     LogicShiftLeft(LogicTree, SignalWidth),
     LogicShiftRight(LogicTree, SignalWidth),
@@ -77,12 +81,26 @@ impl LogicTree {
     pub fn less_than_equal(self, rhs: LogicTree) -> LogicTree {
         return LogicElem::LessThanEqual(self, rhs).into();
     }
+
+    pub fn logic_not(self) -> LogicTree {
+        return LogicElem::LogicNot(self).into();
+    }
+
+    pub fn logic_and(self, rhs: LogicTree) -> LogicTree {
+        return LogicElem::LogicAnd(self, rhs).into();
+    }
+    pub fn logic_or(self, rhs: LogicTree) -> LogicTree {
+        return LogicElem::LogicOr(self, rhs).into();
+    }
+    pub fn logic_xor(self, rhs: LogicTree) -> LogicTree {
+        return LogicElem::LogicXor(self, rhs).into();
+    }
 }
 
 impl Not for LogicTree {
     type Output = Self;
     fn not(self) -> Self::Output {
-        return LogicElem::Not(self).into();
+        return LogicElem::BitNot(self).into();
     }
 }
 
@@ -90,7 +108,7 @@ impl BitAnd for LogicTree {
     type Output = Self;
 
     fn bitand(self, rhs: Self) -> Self::Output {
-        return LogicElem::And(self, rhs).into();
+        return LogicElem::BitAnd(self, rhs).into();
     }
 }
 
@@ -98,14 +116,14 @@ impl BitOr for LogicTree {
     type Output = Self;
 
     fn bitor(self, rhs: Self) -> Self::Output {
-        return LogicElem::Or(self, rhs).into();
+        return LogicElem::BitOr(self, rhs).into();
     }
 }
 
 impl BitXor for LogicTree {
     type Output = Self;
     fn bitxor(self, rhs: Self) -> Self::Output {
-        return LogicElem::Xor(self, rhs).into();
+        return LogicElem::BitXor(self, rhs).into();
     }
 }
 

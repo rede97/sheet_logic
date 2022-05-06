@@ -8,8 +8,13 @@ fn match_flag(input: &str) -> IResult<&str, MatchTableColumn> {
     return Ok((input, MatchTableColumn::Flag(prefix.into())));
 }
 
+fn match_primary(input: &str) -> IResult<&str, MatchTableColumn> {
+    let (input, prefix) = delimited(tag("#primary("), identifier, tag(")"))(input)?;
+    return Ok((input, MatchTableColumn::Primary(prefix.into())));
+}
+
 pub fn match_cmd(input: &str) -> IResult<&str, MatchTableColumn> {
-    return match_flag(input);
+    return alt((match_flag, match_primary))(input);
 }
 
 fn match_wire_case(input: &str) -> IResult<&str, MatchTableContent> {
